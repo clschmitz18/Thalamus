@@ -628,7 +628,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
 
     with painter.masked(RenderOutput.OPERATOR):
       painter.setBrush(QColor(255, 255, 255, 128))
-      painter.drawEllipse(fixation_point, window_size, window_size)
+      painter.drawEllipse(QPointF(fixation_point), window_size, window_size)
 
   context.widget.touch_listener = touch_handler
   context.widget.gaze_listener = gaze_handler
