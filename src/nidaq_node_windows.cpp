@@ -458,7 +458,7 @@ struct NidaqNode::Impl {
       if (current_is_running) {
         counter = 0;
         std::string name = state->at("name");
-        std::string combined_channel = state->at("Channel");
+        std::string combined_channels = state->at("Channel");
         double sample_rate = state->at("Sample Rate");
         bool zero_latency = state->at("Zero Latency");
 
@@ -481,7 +481,7 @@ struct NidaqNode::Impl {
         buffer_size = 20 * size_t(_every_n_samples) * _num_channels;
         // std::function<void()> reader;
 
-        auto device_channels = parse_device_channels(combined_channel);
+        auto device_channels = parse_device_channels(combined_channels);
 
         for (const auto& [device, chans] : device_channels) {
           std::string channel_str = "/" + device + "/" + absl::StrJoin(chans, ",");
@@ -661,6 +661,7 @@ struct NidaqOutputNode::Impl {
   ObservableDictPtr state;
   boost::signals2::scoped_connection state_connection;
   TaskHandle task_handle;
+  std::map<std::string, TaskHandle> task_handles;
   NodeGraph *graph;
   std::weak_ptr<AnalogNode> source;
   boost::asio::io_context &io_context;
@@ -769,17 +770,19 @@ struct NidaqOutputNode::Impl {
               }
             }
             if (advanced) {
-              auto status = daqmxapi->DAQmxWriteDigitalLines(
-                  task_handle, 1, true, -1, DAQmx_Val_GroupByChannel,
-                  digital_values.data(), nullptr, nullptr);
-              if(status < 0) {
-                boost::asio::post(io_context, [&] {
-                  if(check_error(status)) {
-                    (*state)["Running"].assign(false);
-                    return;
-                  }
-                });
-                return;
+              for (const auto& [device, task_handle] : task_handles) {
+                auto status = daqmxapi->DAQmxWriteDigitalLines(
+                    handle, 1, true, -1, DAQmx_Val_GroupByChannel,
+                    digital_values.data(), nullptr, nullptr);
+                if(status < 0) {
+                  boost::asio::post(io_context, [&] {
+                    if(check_error(status)) {
+                      (*state)["Running"].assign(false);
+                      return;
+                    }
+                  });
+                  return;
+                }
               }
             }
           }
@@ -814,17 +817,19 @@ struct NidaqOutputNode::Impl {
               }
             }
             if (advanced) {
-              auto status = daqmxapi->DAQmxWriteAnalogF64(
-                  task_handle, 1, true, -1, DAQmx_Val_GroupByChannel,
-                  values.data(), nullptr, nullptr);
-              if(status < 0) {
-                boost::asio::post(io_context, [&] {
-                  if(check_error(status)) {
-                    (*state)["Running"].assign(false);
-                    return;
-                  }
-                });
-                return;
+              for (const auto& [device, handle] : task_handles) {
+                auto status = daqmxapi->DAQmxWriteAnalogF64(
+                    handle, 1, true, -1, DAQmx_Val_GroupByChannel,
+                    values.data(), nullptr, nullptr);
+                if (status < 0) {
+                  boost::asio::post(io_context, [&] {
+                    if (check_error(status)) {
+                      (*state)["Running"].assign(false);
+                      return;
+                    }
+                  });
+                  return;
+                }
               }
             }
           }
@@ -917,7 +922,8 @@ struct NidaqOutputNode::Impl {
         // started = false;
         fast_forward = state->at("Fast Foward");
         std::string name = state->at("name");
-        std::string channel = state->at("Channel");
+        std::string combined_channels = state->at("Channel");
+        auto device_channels = parse_device_channels(combined_channels);
         std::string channel_name = name + " channel";
         _num_channels = size_t(NidaqNode::get_num_channels(channel));
         last_digital.resize(_num_channels, false);
@@ -931,27 +937,69 @@ struct NidaqOutputNode::Impl {
           nidaq_thread = std::thread(std::bind(&Impl::nidaq_target, this));
         }
 
-        auto daq_error = daqmxapi->DAQmxCreateTask(name.c_str(), &task_handle);
-        if(check_error(daq_error)) {
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
+        for (const auto& [device, chans] : device_channels) {
+          std::string channel_str = "/" + device + "/" +absl::StrJoin(chans, ",");
+          TaskHandle handle = nullptr;
+
+          daq_error = daqmxapi->DAQmxCreateTask((name + "_" + device).c_str(), &handle);
+          if(check_error(daq_error)) {
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          if (digital) {
+            daq_error = daqmxapi->DAQmxCreateDOChan(
+                handle, channel_str.c_str(), "", DAQmx_Val_ChanForAllLines);
+            if(check_error(daq_error)) {
+              daqmxapi->DAQmxClearTask(handle);
+              handle = nullptr;
+              (*state)["Running"].assign(false);
+              return;
+            }
+          } else {
+            daq_error = daqmxapi->DAQmxCreateAOVoltageChan(
+                handle, channel_str.c_str(), "", -10.0, 10.0,
+                DAQmx_Val_Volts, nullptr);
+            if(check_error(daq_error)) {
+              daqmxapi->DAQmxClearTask(handle);
+              handle = nullptr;
+              (*state)["Running"].assign(false);
+              return;
+            }
+          }
+
+          std:: string clk_src = "/" + device + "/PXI_Clk10";
+          daq_error = daqmxapi->DAQmxCfgSampClkTiming(
+              handle, clk_src.c_str(), _sample_rate, DAQmx_Val_Rising,
+              DAQmx_Val_ContSamps, buffer_size);
+          if(check_error(daq_error)) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          std::string trig_src = "/" + device + "/RTSI0";
+          daq_error = daqmxapi->DAQmxCfgDigEdgeStartTrig(
+              handle, trig_src.c_str(), DAQmx_Val_Rising);
+          if(check_error(daq_error)) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          task_handles[device] = handle;
+
         }
 
-        if (digital) {
-          daq_error = daqmxapi->DAQmxCreateDOChan(
-              task_handle, channel.c_str(), "", DAQmx_Val_ChanForAllLines);
-        } else {
-          daq_error = daqmxapi->DAQmxCreateAOVoltageChan(
-              task_handle, channel.c_str(), "", -10.0, 10.0, DAQmx_Val_Volts,
-              nullptr);
-        }
-        if(check_error(daq_error)) {
-          daqmxapi->DAQmxClearTask(task_handle);
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
-        }
+        for (const auto& [device, handle] : task_handles) {
+          if (check_error(daqmxapi->DAQmxStartTask(handle), "DAQmxStartTask")) {
+            (*state)["Running"].assign(false);
+            return;
+          }
+        } 
 
         // daq_error = DAQmxCfgSampClkTiming(task_handle, "", 1000,
         // DAQmx_Val_Rising, DAQmx_Val_ContSamps, max_level);
@@ -966,6 +1014,12 @@ struct NidaqOutputNode::Impl {
         //   on_timer(reader, polling_interval, boost::system::error_code());
         // }
       } else {
+        for (const auto& [device, handle] : task_handles) {
+          daqmxapi->DAQmxStopTask(handle);
+          daqmxapi->DAQmxClearTask(handle);
+        }
+        task_handles.clear();
+
         if (nidaq_thread.joinable()) {
           nidaq_thread.join();
         }
@@ -1283,23 +1337,25 @@ struct NidaqOutputNode::Impl {
         }
       }
       int status;
-      if (digital) {
-        TRACE_EVENT("thalamus", "NidaqOutputNode::on_data(write digital)");
-        status = daqmxapi->DAQmxWriteDigitalLines(
-            task_handle, 1, true, -1, DAQmx_Val_GroupByChannel,
-            last_digital.data(), nullptr, nullptr);
-      } else {
-        TRACE_EVENT("thalamus", "NidaqOutputNode::on_data(write analog)");
-        status = daqmxapi->DAQmxWriteAnalogF64(
-            task_handle, 1, true, -1, DAQmx_Val_GroupByChannel,
-            last_analog.data(), nullptr, nullptr);
+      for (const auto& [device, handle] : task_handles) {
+        if (digital) {
+          TRACE_EVENT("thalamus", "NidaqOutputNode::on_data(write digital)");
+          status = daqmxapi->DAQmxWriteDigitalLines(
+              task_handle, 1, true, -1, DAQmx_Val_GroupByChannel,
+              last_digital.data(), nullptr, nullptr);
+        } else {
+          TRACE_EVENT("thalamus", "NidaqOutputNode::on_data(write analog)");
+          status = daqmxapi->DAQmxWriteAnalogF64(
+              task_handle, 1, true, -1, DAQmx_Val_GroupByChannel,
+              last_analog.data(), nullptr, nullptr);
+        }
+        if(check_error(status)) {
+          daqmxapi->DAQmxClearTask(task_handle);
+          task_handle = nullptr;
+          (*state)["Running"].assign(false);
+        }
+        return;
       }
-      if(check_error(status)) {
-        daqmxapi->DAQmxClearTask(task_handle);
-        task_handle = nullptr;
-        (*state)["Running"].assign(false);
-      }
-      return;
     } else {
       std::lock_guard<std::mutex> lock(mutex);
       // buffers.assign(node->num_channels(), std::vector<double>());
