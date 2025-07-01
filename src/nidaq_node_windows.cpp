@@ -8,6 +8,13 @@
 #include <regex>
 #include <thalamus/thread.hpp>
 
+// For parsing card devices and channels
+#include <map>
+#include <vector>
+#include <string>
+#include <regex>
+#include <sstream>
+
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
@@ -256,6 +263,31 @@ static bool prepare_nidaq() {
   return true;
 }
 
+std::map<std::string, std::vector<std::string>>
+parse_device_channels(const std::string& input) {
+  std::map<std::string, std::vector<std::string>> result;
+  std::stringstream ss(input);
+  std::string token;
+
+  std::regex pattern(R"(([^/]+)/([a-zA-Z]+)(\d+)(?::(\d+))?)");
+
+  while (std::getline(ss, token, ',')) {
+    std::smatch match;
+    if (std::regex_match(token, match, pattern)) {
+      std::string device = match[1];
+      std::string base = match[2];
+      int start = std::stoi(match[3]);
+      int end = match[4].matched ? std::stoi(match[4]) : start;
+
+      for (int i = start; i <= end; ++i) {
+        result[device].emplace_back(base + std::to_string(i));
+      }
+    }
+  }
+
+  return result;
+}
+
 static thalamus::vector<std::string> get_channels(const std::string &channel) {
   if (channel.find(",") != std::string::npos) {
     return absl::StrSplit(channel, ',');
@@ -291,6 +323,7 @@ struct NidaqNode::Impl {
   ObservableDictPtr state;
   boost::signals2::scoped_connection state_connection;
   TaskHandle task_handle;
+  std::map<std::string, TaskHandle> task_handles;
   boost::asio::io_context &io_context;
   boost::asio::high_resolution_timer timer;
   size_t analog_buffer_position;
@@ -425,7 +458,7 @@ struct NidaqNode::Impl {
       if (current_is_running) {
         counter = 0;
         std::string name = state->at("name");
-        std::string channel = state->at("Channel");
+        std::string combined_channel = state->at("Channel");
         double sample_rate = state->at("Sample Rate");
         bool zero_latency = state->at("Zero Latency");
 
@@ -444,96 +477,132 @@ struct NidaqNode::Impl {
 
         _every_n_samples = zero_latency ? 1 : int(polling_interval / _sample_interval);
 
-        std::string channel_name = name + " channel";
+        // std::string channel_name = name + " channel";
         buffer_size = 20 * size_t(_every_n_samples) * _num_channels;
-        std::function<void()> reader;
+        // std::function<void()> reader;
 
-        auto daq_error = daqmxapi->DAQmxCreateTask(name.c_str(), &task_handle);
-        if(check_error(daq_error, "DAQmxCreateTask")) {
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
-        }
+        auto device_channels = parse_device_channels(combined_channel);
 
-        if(channel_type == "Voltage") {
-          daq_error = daqmxapi->DAQmxCreateAIVoltageChan(
-              task_handle, channel.c_str(), channel_name.c_str(),
-              terminal_config, -10.0, 10.0, DAQmx_Val_Volts, nullptr);
-          if(check_error(daq_error, "DAQmxCreateAIVoltageChan")) {
-            daqmxapi->DAQmxClearTask(task_handle);
-            task_handle = nullptr;
+        for (const auto& [device, chans] : device_channels) {
+          std::string channel_str = "/" + device + "/" + absl::StrJoin(chans, ",");
+          TaskHandle handle = nullptr;
+        
+          auto daq_error = daqmxapi->DAQmxCreateTask(name + "_" + device.c_str(), &handle);
+          if(check_error(daq_error, "DAQmxCreateTask")) {
+            handle = nullptr;
             (*state)["Running"].assign(false);
             return;
           }
-        } else if (channel_type == "Current") {
-          daq_error = daqmxapi->DAQmxCreateAICurrentChan(
-              task_handle, channel.c_str(), channel_name.c_str(),
-              terminal_config, -10.0, 10.0, DAQmx_Val_Amps, shunt_resistor_location, shunt_resistor_ohms, nullptr);
-          if(check_error(daq_error, "DAQmxCreateAICurrentChan")) {
-            daqmxapi->DAQmxClearTask(task_handle);
-            task_handle = nullptr;
+
+          if(channel_type == "Voltage") {
+            daq_error = daqmxapi->DAQmxCreateAIVoltageChan(
+                handle, channel_str.c_str(), "",
+                terminal_config, -10.0, 10.0, DAQmx_Val_Volts, nullptr);
+            if(check_error(daq_error, "DAQmxCreateAIVoltageChan")) {
+              daqmxapi->DAQmxClearTask(handle);
+              handle = nullptr;
+              (*state)["Running"].assign(false);
+              return;
+            }
+          } else if (channel_type == "Current") {
+            daq_error = daqmxapi->DAQmxCreateAICurrentChan(
+                handle, channel_str.c_str(), "",
+                terminal_config, -10.0, 10.0, DAQmx_Val_Amps, 
+                shunt_resistor_location, shunt_resistor_ohms, nullptr);
+            if(check_error(daq_error, "DAQmxCreateAICurrentChan")) {
+              daqmxapi->DAQmxClearTask(handle);
+              handle = nullptr;
+              (*state)["Running"].assign(false);
+              return;
+            }
+          } else {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            thalamus_grpc::Dialog dialog;
+            dialog.set_type(thalamus_grpc::Dialog::Type::Dialog_Type_ERROR);
+            dialog.set_title(std::string("NIDAQ Error"));
+            dialog.set_message(std::string("Unexpected channel type: ") + channel_type);
+            graph->dialog(dialog);
+            return;
+          }
+          analog_buffer.resize(buffer_size);
+
+          std::string clk_src = "/" + device + "/PXI_Clk10";
+          daq_error = daqmxapi->DAQmxCfgSampClkTiming(
+              handle, clk_src.c_str(), sample_rate, DAQmx_Val_Rising,
+              DAQmx_Val_ContSamps, buffer_size);
+          if(check_error(daq_error, "DAQmxCfgSampClkTiming")) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
             (*state)["Running"].assign(false);
             return;
           }
-        } else {
-          daqmxapi->DAQmxClearTask(task_handle);
-          task_handle = nullptr;
-          thalamus_grpc::Dialog dialog;
-          dialog.set_type(thalamus_grpc::Dialog::Type::Dialog_Type_ERROR);
-          dialog.set_title(std::string("NIDAQ Error"));
-          dialog.set_message(std::string("Unexpected channel type: ") + channel_type);
-          graph->dialog(dialog);
-          return;
-        }
-        analog_buffer.resize(buffer_size);
 
-        daq_error = daqmxapi->DAQmxCfgSampClkTiming(
-            task_handle, nullptr, sample_rate, DAQmx_Val_Rising,
-            DAQmx_Val_ContSamps, buffer_size);
-        if(check_error(daq_error, "DAQmxCfgSampClkTiming")) {
-          daqmxapi->DAQmxClearTask(task_handle);
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
+          std::string trig_src = "/" + device + "/RTSI0";
+          daq_error = daqmxapi->DAQmxCfgDigEdgeStartTrig(
+              handle, trig_src.c_str(), DAQmx_Val_Rising);
+          if(check_error(daq_error, "DAQmxCfgDigEdgeStartTrig")) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          if (device == "PXI1Slot2") {
+            daq_error = daqmxapi->DAQmxExportSignal(
+              handle, DAQmx_Val_StartTrigger, "/PXI1Slot2/RTSI0");
+          }
+          if(check_error(daq_error, "DAQmxExportSignal")) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          daq_error = daqmxapi->DAQmxRegisterEveryNSamplesEvent(
+              handle, DAQmx_Val_Acquired_Into_Buffer,
+              uint32_t(_every_n_samples), 0, NidaqCallback,
+              new std::weak_ptr<Node>(outer->weak_from_this()));
+          if(check_error(daq_error, "DAQmxRegisterEveryNSamplesEvent")) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          daq_error = daqmxapi->DAQmxSetBufInputBufSize(handle,
+                                                        uint32_t(buffer_size));
+          if(check_error(daq_error, "DAQmxSetBufInputBufSize")) {
+            daqmxapi->DAQmxClearTask(handle);
+            handle = nullptr;
+            (*state)["Running"].assign(false);
+            return;
+          }
+
+          task_handles[device] = handle;
         }
 
-        daq_error = daqmxapi->DAQmxRegisterEveryNSamplesEvent(
-            task_handle, DAQmx_Val_Acquired_Into_Buffer,
-            uint32_t(_every_n_samples), 0, NidaqCallback,
-            new std::weak_ptr<Node>(outer->weak_from_this()));
-        if(check_error(daq_error, "DAQmxRegisterEveryNSamplesEvent")) {
-          daqmxapi->DAQmxClearTask(task_handle);
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
+        for (const auto& [device, handle] : task_handles) {
+          if (check_error(daqmxapi->DAQmxStartTask(handle), "DAQmxStartTask")) {
+            daqmxapi->DAQmxClearTask(handle);
+            task_handles.erase(device);
+            (*state)["Running"].assign(false);
+            return;
+          }
         }
 
-        daq_error = daqmxapi->DAQmxSetBufInputBufSize(task_handle,
-                                                      uint32_t(buffer_size));
-        if(check_error(daq_error, "DAQmxSetBufInputBufSize")) {
-          daqmxapi->DAQmxClearTask(task_handle);
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
-        }
-
-        daq_error = daqmxapi->DAQmxStartTask(task_handle);
-        if(check_error(daq_error, "DAQmxStartTask")) {
-          daqmxapi->DAQmxClearTask(task_handle);
-          task_handle = nullptr;
-          (*state)["Running"].assign(false);
-          return;
-        }
         _time = 0ns;
         outer->channels_changed(outer);
 
         // if (reader) {
         //   on_timer(reader, polling_interval, boost::system::error_code());
         // }
-      } else if (task_handle != nullptr) {
-        daqmxapi->DAQmxStopTask(task_handle);
-        daqmxapi->DAQmxClearTask(task_handle);
-        task_handle = nullptr;
+      } else {
+        for (const auto& [device,handle] : task_handles) {
+          daqmxapi->DAQmxStopTask(task_handle);
+          daqmxapi->DAQmxClearTask(task_handle);
+        }
+        task_handles.clear();
         // timer.cancel();
       }
     }
