@@ -548,9 +548,9 @@ struct NidaqNode::Impl {
             return;
           }
 
-          if (device == "PXI1Slot2") {
+          if (device == "PXI1Slot4") {
             daq_error = daqmxapi->DAQmxExportSignal(
-              handle, DAQmx_Val_StartTrigger, "/PXI1Slot2/RTSI0");
+              handle, DAQmx_Val_StartTrigger, "/PXI1Slot4/RTSI0");
           }
           if(check_error(daq_error, "DAQmxExportSignal")) {
             daqmxapi->DAQmxClearTask(handle);
