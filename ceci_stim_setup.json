@@ -1,0 +1,203 @@
+{
+  "touch_channels": [
+    0,
+    1
+  ],
+  "task_clusters": [
+    {
+      "type": "task_cluster",
+      "name": "Untitled",
+      "weight": 0,
+      "tasks": [
+        {
+          "task_type": "ceci_stim_task",
+          "type": "task",
+          "goal": 1,
+          "name": "Untitled",
+          "intertrial_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "start_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "hold_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "blink_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "fail_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "success_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "target_x": {
+            "min": 1,
+            "max": 1
+          },
+          "target_y": {
+            "min": 1,
+            "max": 1
+          },
+          "target_width": {
+            "min": 1,
+            "max": 1
+          },
+          "target_height": {
+            "min": 1,
+            "max": 1
+          },
+          "target_color": [
+            255,
+            255,
+            255
+          ],
+          "targets": [],
+          "baseline_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "window_size": 10.0,
+          "Mux": 0,
+          "Electrode": "uECog-244ch-V5",
+          "Polarity": "Monopolar",
+          "Stimulation Channel": "AO1",
+          "Return Channel": "",
+          "Phase": "Biphasic",
+          "Lead": "Cathode-leading",
+          "Amplitude (uA)": 100.0,
+          "Pulse Width (us)": 200.0,
+          "Frequency (Hz)": 200.0,
+          "Number of Pulses": 1,
+          "Interphase Delay (ms)": 0.0,
+          "Stimulation Duration (s)": 0.5,
+          "Discharge Duration (s)": 0.5
+        }
+      ]
+    }
+  ],
+  "queue": [],
+  "reward_schedule": {
+    "schedules": [
+      [
+        0
+      ]
+    ],
+    "index": 0
+  },
+  "Orchestration": {
+    "Remote Executor": false,
+    "Processes": []
+  },
+  "nodes": [
+    {
+      "name": "Ceci",
+      "type": "NIDAQ_OUT",
+      "Running": true,
+      "Source": "Mux",
+      "Fast Foward": false,
+      "Channel": "/PXI1Slot4/port0/line20,/PXI1Slot4/port0/line29,/PXI1Slot4/port0/line19,/PXI1Slot4/port0/line26,/PXI1Slot4/port0/line7,/PXI1Slot4/port0/line2,/PXI1Slot4/port0/line1,/PXI1Slot4/port0/line6,/PXI1Slot4/port0/line8",
+      "View": false,
+      "Stims": []
+    },
+    {
+      "name": "Mux",
+      "type": "ANALOG",
+      "Widget is Touchpad": false
+    },
+    {
+      "name": "Node 1",
+      "type": "NIDAQ",
+      "Running": true,
+      "Sample Rate": 125000.0,
+      "Poll Interval": 16,
+      "Zero Latency": false,
+      "Channel": "PXI1Slot4/ai17,PXI1Slot4/ai16,PXI1Slot4/ai7,PXI1Slot4/ai6",
+      "Terminal Config": "Default",
+      "Channel Type": "Voltage",
+      "Shunt Resistor Location": "Default",
+      "Shunt Resistor Ohms": 1000.0,
+      "View": true,
+      "view_geometry": [
+        0,
+        74,
+        400,
+        910
+      ]
+    },
+    {
+      "name": "Node 2",
+      "type": "STORAGE2",
+      "Running": false,
+      "Output File": "digital_stimD1_AO1_within_card",
+      "Compress Analog": false,
+      "Compress Video": false,
+      "Sources": [
+        {
+          "Node": "Node 1",
+          "Time Series": true,
+          "Image": true,
+          "Motion": true,
+          "Text": true
+        }
+      ],
+      "Files": [],
+      "Metadata": [
+        {
+          "Key": "Rec",
+          "Value": 1
+        }
+      ],
+      "rec": 1,
+      "start": 1663443.3501572
+    }
+  ],
+  "Persistence": {
+    "Cached": []
+  },
+  "eye_scaling": {
+    "I": {
+      "x": 1,
+      "y": 1
+    },
+    "II": {
+      "x": 1,
+      "y": 1
+    },
+    "III": {
+      "x": 1,
+      "y": 1
+    },
+    "IV": {
+      "x": 1,
+      "y": 1
+    }
+  },
+  "status": "Untitled/Untitled = 7/0",
+  "thalamus_view_geometry": [
+    100,
+    100,
+    686,
+    768
+  ],
+  "data_views": [],
+  "node_widgets": [
+    {
+      "node": "Node 2",
+      "dock_area": "right",
+      "view_geometry": [
+        350,
+        33,
+        336,
+        735
+      ]
+    }
+  ]
+}
