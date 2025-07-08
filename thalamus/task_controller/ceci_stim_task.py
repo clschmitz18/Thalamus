@@ -580,12 +580,45 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   print(pre_mux_signal)
   await context.inject_analog('Mux', pre_mux_signal)
 
-  mux_data = mux_bits + stim_bits + dischar_bits + power_bit
-
   digital_declaration: StimDeclaration = StimDeclaration()
   digital_data = digital_declaration.data
   digital_data.channel_type = AnalogResponse.ChannelType.Digital
-  digital_data.data.extend(mux_data)
+
+  stim_duration_s = context.task_config['Stimulation Duration (s)']
+  discharge_duration_s = context.task_config['Discharge Duration (s)']
+
+  def make_digital_sample(stim_on=False, discharge_on=False, power_on=True):
+    stim = stim_bits if stim_on else [0, 0, 0, 0]
+    discharge = [5, 5] if discharge_on else [0, 0]
+    power = [5 if power_on else 0]
+    return mux_bits + stim + discharge + power
+  
+  samples = []
+  intervals = []
+
+  # Stim phase
+  samples.append(make_digital_sample(stim_on=True))
+  intervals.append(int(1e9 * stim_duration_s))
+
+  # Discharge phase
+  if discharge_duration_s > 0:
+    samples.append(make_digital_sample(discharge_on=True))
+    intervals.append(int(1e9 * discharge_duration_s))
+
+  # Inter-stim phase
+  samples.append(make_digital_sample())
+  intervals.append(1_000_000)  # 1ms or any short interval
+
+  # Print
+  print('Digital output samples:')
+  for i, sample in enumerate(samples):
+    print(f'Sample {i}: {sample}')
+
+  num_lines = 11
+  num_samples = len(samples)
+  for line in range(num_lines):
+    for sample in samples:
+      digital_data.data.append(sample[line])
 
   digital_lines = [
     '/PXI1Slot4/port0/line20',  # Mux bit A0
@@ -602,9 +635,11 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   ]
 
   for i, line in enumerate(digital_lines):
-    digital_data.spans.append(Span(begin=i, end=i+1, name=line))
+    begin = i * num_samples
+    end = begin + num_samples
+    digital_data.spans.append(Span(begin=begin, end=end, name=line))
   
-  digital_data.sample_intervals.extend([0] * len(mux_data))
+  digital_data.sample_intervals.extend(intervals)
   digital_data.trigger = "/PXI1Slot4/RTSI0"
 
   await context.arm_stim('MuxDigital', digital_declaration)
