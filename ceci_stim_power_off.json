@@ -1,0 +1,179 @@
+{
+  "touch_channels": [
+    0,
+    1
+  ],
+  "task_clusters": [
+    {
+      "type": "task_cluster",
+      "name": "Untitled",
+      "weight": 0,
+      "tasks": [
+        {
+          "task_type": "ceci_stim_task",
+          "type": "task",
+          "goal": 1,
+          "name": "Untitled",
+          "intertrial_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "start_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "hold_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "blink_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "fail_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "success_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "target_x": {
+            "min": 1,
+            "max": 1
+          },
+          "target_y": {
+            "min": 1,
+            "max": 1
+          },
+          "target_width": {
+            "min": 1,
+            "max": 1
+          },
+          "target_height": {
+            "min": 1,
+            "max": 1
+          },
+          "target_color": [
+            255,
+            255,
+            255
+          ],
+          "targets": [],
+          "baseline_timeout": {
+            "min": 1,
+            "max": 1
+          },
+          "window_size": 10.0,
+          "Mux": 0,
+          "Electrode": "uECog-244ch-V5",
+          "Polarity": "Monopolar",
+          "Stimulation Channel": "AO1",
+          "Return Channel": "",
+          "Phase": "Biphasic",
+          "Lead": "Cathode-leading",
+          "Amplitude (uA)": 100.0,
+          "Pulse Width (us)": 200.0,
+          "Frequency (Hz)": 200.0,
+          "Number of Pulses": 1,
+          "Interphase Delay (ms)": 0.0,
+          "Stimulation Duration (s)": 0.5,
+          "Discharge Duration (s)": 0.5
+        }
+      ]
+    }
+  ],
+  "queue": [],
+  "reward_schedule": {
+    "schedules": [
+      [
+        0
+      ]
+    ],
+    "index": 0
+  },
+  "Orchestration": {
+    "Remote Executor": false,
+    "Processes": []
+  },
+  "nodes": [
+    {
+      "name": "Node 1",
+      "type": "WAVE",
+      "Running": true,
+      "Sample Rate": 1000.0,
+      "Poll Interval": 16,
+      "View": false,
+      "Waves": [
+        {
+          "Frequency": 0.5,
+          "Amplitude": 10.0,
+          "Shape": "Square",
+          "Offset": 0.0,
+          "Duty Cycle": 0.5,
+          "Phase": 0.0
+        }
+      ],
+      "Amplitude": 10.0,
+      "Shape": "Square",
+      "Frequency": 0.5,
+      "view_geometry": [
+        100,
+        100,
+        400,
+        100
+      ]
+    },
+    {
+      "name": "Node 2",
+      "type": "NIDAQ_OUT",
+      "Running": false,
+      "Source": "Node 1",
+      "Fast Foward": false,
+      "Channel": "PXI1Slot4/port0/line8",
+      "View": false,
+      "Stims": []
+    }
+  ],
+  "Persistence": {
+    "Cached": []
+  },
+  "eye_scaling": {
+    "I": {
+      "x": 1,
+      "y": 1
+    },
+    "II": {
+      "x": 1,
+      "y": 1
+    },
+    "III": {
+      "x": 1,
+      "y": 1
+    },
+    "IV": {
+      "x": 1,
+      "y": 1
+    }
+  },
+  "status": "",
+  "thalamus_view_geometry": [
+    100,
+    100,
+    1012,
+    768
+  ],
+  "data_views": [],
+  "node_widgets": [
+    {
+      "node": "Node 2",
+      "dock_area": "right",
+      "view_geometry": [
+        369,
+        33,
+        643,
+        735
+      ]
+    }
+  ]
+}
