@@ -555,18 +555,10 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   mux_bits = [5*((mux >> i) & 1) for i in range(4)]
   stim_bits = [5 if e else 0 for e in all_enabled]
   stim_bits = [stim_bits[1], stim_bits[3], stim_bits[2], stim_bits[0]]
-  
-  #stim_request = StimRequest()
-  stim_declaration: StimDeclaration = StimDeclaration()
-  stim_data: AnalogResponse = stim_declaration.data
-  stim_data.channel_type = AnalogResponse.ChannelType.Voltage
-  waveform = compute_waveform(context.task_config)
-  if waveform is not None:
-    stim_data.data.extend(waveform)
-    stim_data.spans.append(Span(begin=0,end=len(stim_data.data),name=f'/PXI1Slot4/ao{ao}'))
-    stim_data.sample_intervals.append(int(1e9/125e3))
+  dischar_bits = [0, 0]
+  power_bit = [5]
 
-  pre_mux_data = mux_bits + [0, 0, 0, 0, 0, 0, 5]
+  pre_mux_data = mux_bits + [0, 0, 0, 0] + dischar_bits + power_bit
 
   pre_mux_signal = AnalogResponse(
       data=pre_mux_data,
@@ -587,26 +579,45 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   )
   print(pre_mux_signal)
   await context.inject_analog('Mux', pre_mux_signal)
+
+  mux_data = mux_bits + stim_bits + dischar_bits + power_bit
+
+  digital_declaration: StimDeclaration = StimDeclaration()
+  digital_data = digital_declaration.data
+  digital_data.channel_type = AnalogResponse.ChannelType.Digital
+  digital_data.data.extend(mux_data)
+
+  digital_lines = [
+    '/PXI1Slot4/port0/line20',  # Mux bit A0
+    '/PXI1Slot4/port0/line29',  # Mux bit A1
+    '/PXI1Slot4/port0/line19',  # Mux bit A2
+    '/PXI1Slot4/port0/line26',  # Mux bit A3
+    '/PXI1Slot4/port0/line7',   # StimD1
+    '/PXI1Slot4/port0/line2',   # StimD2
+    '/PXI1Slot4/port0/line1',   # StimD3
+    '/PXI1Slot4/port0/line6',   # StimD4
+    '/PXI1Slot4/port0/line4',   # StimD5
+    '/PXI1Slot4/port0/line5',   # StimD6
+    '/PXI1Slot4/port0/line8',   # Power
+  ]
+
+  for i, line in enumerate(digital_lines):
+    digital_data.spans.append(Span(begin=i, end=i+1, name=line))
   
-  mux_signal = AnalogResponse(
-    data=mux_bits + stim_bits + [0, 0, 5],
-    spans=[
-      Span(begin=0,end=1,name='/PXI1Slot4/port0/line20'),
-      Span(begin=1,end=2,name='/PXI1Slot4/port0/line29'),
-      Span(begin=2,end=3,name='/PXI1Slot4/port0/line19'),
-      Span(begin=3,end=4,name='/PXI1Slot4/port0/line26'),
-      Span(begin=4,end=5,name='/PXI1Slot4/port0/line7'),
-      Span(begin=5,end=6,name='/PXI1Slot4/port0/line2'),
-      Span(begin=6,end=7,name='/PXI1Slot4/port0/line1'),
-      Span(begin=7,end=8,name='/PXI1Slot4/port0/line6'),
-      Span(begin=8,end=9,name='/PXI1Slot4/port0/line4'),
-      Span(begin=9,end=10,name='/PXI1Slot4/port0/line5'),
-      Span(begin=10,end=11,name='/PXI1Slot4/port0/line8'),
-    ],
-    sample_intervals=[0] * 11
-  )
-  print(mux_signal)
-  # await context.inject_analog('Mux', mux_signal)
+  digital_data.sample_intervals.extend([0] * len(mux_data))
+  digital_data.trigger = "/PXI1Slot4/RTSI0"
+
+  await context.arm_stim('MuxDigital', digital_declaration)
+
+  stim_declaration: StimDeclaration = StimDeclaration()
+  stim_data: AnalogResponse = stim_declaration.data
+  stim_data.channel_type = AnalogResponse.ChannelType.Voltage
+  waveform = compute_waveform(context.task_config)
+  if waveform is not None:
+    stim_data.data.extend(waveform)
+    stim_data.spans.append(Span(begin=0,end=len(stim_data.data),name=f'/PXI1Slot4/ao{ao}'))
+    stim_data.sample_intervals.append(int(1e9/125e3))
+
   if waveform is not None:
     await context.arm_stim('Ceci', stim_declaration)
 
@@ -651,7 +662,6 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
         print('STIMMING')
         create_task_with_exc_handling(asyncio.gather(
           context.log('STIM'),
-          context.inject_analog('Mux', mux_signal),
           context.trigger_stim('Ceci')
         ))
         deliver_stim = False
