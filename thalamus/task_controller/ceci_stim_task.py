@@ -560,25 +560,32 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
 
   pre_mux_data = mux_bits + [0, 0, 0, 0] + dischar_bits + power_bit
 
-  pre_mux_signal = AnalogResponse(
-      data=pre_mux_data,
-      spans=[
-          Span(begin=0, end=1, name='/PXI1Slot4/port0/line20'),
-          Span(begin=1, end=2, name='/PXI1Slot4/port0/line29'),
-          Span(begin=2, end=3, name='/PXI1Slot4/port0/line19'),
-          Span(begin=3, end=4, name='/PXI1Slot4/port0/line26'),
-          Span(begin=4, end=5, name='/PXI1Slot4/port0/line7'),
-          Span(begin=5, end=6, name='/PXI1Slot4/port0/line2'),
-          Span(begin=6, end=7, name='/PXI1Slot4/port0/line1'),
-          Span(begin=7, end=8, name='/PXI1Slot4/port0/line6'),
-          Span(begin=8, end=9, name='/PXI1Slot4/port0/line4'),
-          Span(begin=9, end=10, name='/PXI1Slot4/port0/line5'),
-          Span(begin=10, end=11, name='/PXI1Slot4/port0/line8'),
-      ],
-      sample_intervals=[0] * 11
-  )
-  print(pre_mux_signal)
-  await context.inject_analog('Mux', pre_mux_signal)
+  pre_stim_declaration: StimDeclaration = StimDeclaration()
+  pre_stim_data = pre_stim_declaration.data
+  pre_stim_data.channel_type = AnalogResponse.ChannelType.Digital
+  pre_stim_data.data.extend(pre_mux_data)
+
+  digital_lines = [
+    '/PXI1Slot4/port0/line20',  # Mux bit A0
+    '/PXI1Slot4/port0/line29',  # Mux bit A1
+    '/PXI1Slot4/port0/line19',  # Mux bit A2
+    '/PXI1Slot4/port0/line26',  # Mux bit A3
+    '/PXI1Slot4/port0/line7',   # StimD1
+    '/PXI1Slot4/port0/line2',   # StimD2
+    '/PXI1Slot4/port0/line1',   # StimD3
+    '/PXI1Slot4/port0/line6',   # StimD4
+    '/PXI1Slot4/port0/line4',   # StimD5
+    '/PXI1Slot4/port0/line5',   # StimD6
+    '/PXI1Slot4/port0/line8',   # Power
+  ]
+
+  for i, name in enumerate(digital_lines):
+    pre_stim_data.spans.append(Span(begin=i, end=i+1, name=name))
+
+  pre_stim_data.sample_intervals.extend([0] * 11)
+
+  await context.arm_stim("PreMux", pre_stim_declaration)
+  await context.trigger_stim("PreMux")
 
   digital_declaration: StimDeclaration = StimDeclaration()
   digital_data = digital_declaration.data
@@ -619,20 +626,6 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   for line in range(num_lines):
     for sample in samples:
       digital_data.data.append(sample[line])
-
-  digital_lines = [
-    '/PXI1Slot4/port0/line20',  # Mux bit A0
-    '/PXI1Slot4/port0/line29',  # Mux bit A1
-    '/PXI1Slot4/port0/line19',  # Mux bit A2
-    '/PXI1Slot4/port0/line26',  # Mux bit A3
-    '/PXI1Slot4/port0/line7',   # StimD1
-    '/PXI1Slot4/port0/line2',   # StimD2
-    '/PXI1Slot4/port0/line1',   # StimD3
-    '/PXI1Slot4/port0/line6',   # StimD4
-    '/PXI1Slot4/port0/line4',   # StimD5
-    '/PXI1Slot4/port0/line5',   # StimD6
-    '/PXI1Slot4/port0/line8',   # Power
-  ]
 
   for i, line in enumerate(digital_lines):
     begin = i * num_samples
