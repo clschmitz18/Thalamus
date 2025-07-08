@@ -567,7 +567,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
     stim_data.sample_intervals.append(int(1e9/125e3))
 
   mux_signal = AnalogResponse(
-    data=mux_bits + stim_bits + [5],
+    data=mux_bits + stim_bits + [0, 0, 5],
     spans=[
       Span(begin=0,end=1,name='/PXI1Slot4/port0/line20'),
       Span(begin=1,end=2,name='/PXI1Slot4/port0/line29'),
@@ -577,9 +577,11 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
       Span(begin=5,end=6,name='/PXI1Slot4/port0/line2'),
       Span(begin=6,end=7,name='/PXI1Slot4/port0/line1'),
       Span(begin=7,end=8,name='/PXI1Slot4/port0/line6'),
-      Span(begin=8,end=9,name='/PXI1Slot4/port0/line8'),
+      Span(begin=8,end=9,name='/PXI1Slot4/port0/line4'),
+      Span(begin=9,end=10,name='/PXI1Slot4/port0/line5'),
+      Span(begin=10,end=11,name='/PXI1Slot4/port0/line8'),
     ],
-    sample_intervals=[0, 0, 0, 0, 0, 0, 0, 0, 0])
+    sample_intervals=[0] * 11)
   print(mux_signal)
   await context.inject_analog('Mux', mux_signal)
   if waveform is not None:
