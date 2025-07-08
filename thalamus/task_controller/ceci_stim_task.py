@@ -101,7 +101,7 @@ def compute_waveform(config: ObservableDict):
             break
           out_wave[offset:offset + pulse_width_samples] = polarity*amplitude_v-dc_off
 
-    out_wave[0] = 0
+    # out_wave[0] = 0
     out_wave[-1] = 0
     return out_wave
     #numpy.savetxt("foo.csv", out_wave)
