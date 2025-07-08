@@ -131,13 +131,25 @@ class WaveformWidget(QWidget):
     self.path.moveTo(0, out_wave[0])
     sample_rate_hz = 125e3
     sample_period_s = 1/sample_rate_hz
-    for i, sample in enumerate(out_wave):
+
+    # Compute max time to display: 2 pulse train durations
+    frequency_hz = self.config['Frequency (Hz)']
+    duration_s = 1 / frequency_hz
+    max_time_s = 2 * duration_s
+    max_samples = int(max_time_s * sample_rate_hz)
+
+    for i, sample in enumerate(out_wave[:max_samples]):
       #t = i*sample_period_s
       #if i >= cycle_samples:
         #break
       self.path.lineTo(i*sample_period_s, sample)
 
-    self.bounds = 0, numpy.min(out_wave), i*sample_period_s, (numpy.max(out_wave) - numpy.min(out_wave))
+    self.bounds = (
+      0, 
+      numpy.min(out_wave[:max_samples]), 
+      max_samples*sample_period_s, 
+      (numpy.max(out_wave[:max_samples]) - numpy.min(out_wave[:max_samples]))
+    )
     self.update()
 
   def paintEvent(self, e: QPaintEvent):
