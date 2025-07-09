@@ -633,7 +633,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
     stim_do_data.spans.append(Span(begin=begin, end=end, name=line))
   
   stim_do_data.sample_intervals.extend(intervals)
-  stim_do_data.trigger = "/PXI1Slot4/RTSI0"
+  stim_do_declaration.trigger = "/PXI1Slot4/RTSI0"
 
   await context.arm_stim('MuxDigital', stim_do_declaration)
 
