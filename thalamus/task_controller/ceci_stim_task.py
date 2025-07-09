@@ -558,12 +558,12 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   dischar_bits = [0, 0]
   power_bit = [5]
 
-  pre_mux_data = mux_bits + [0, 0, 0, 0] + dischar_bits + power_bit
+  pre_stim_do = mux_bits + [0, 0, 0, 0] + dischar_bits + power_bit
 
-  pre_stim_declaration: StimDeclaration = StimDeclaration()
-  pre_stim_data = pre_stim_declaration.data
-  pre_stim_data.channel_type = AnalogResponse.ChannelType.Digital
-  pre_stim_data.data.extend(pre_mux_data)
+  pre_stim_do_declaration: StimDeclaration = StimDeclaration()
+  pre_stim_do_data = pre_stim_do_declaration.data
+  pre_stim_do_data.channel_type = AnalogResponse.ChannelType.Digital
+  pre_stim_do_data.data.extend(pre_stim_do)
 
   digital_lines = [
     '/PXI1Slot4/port0/line20',  # Mux bit A0
@@ -580,21 +580,21 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   ]
 
   for i, name in enumerate(digital_lines):
-    pre_stim_data.spans.append(Span(begin=i, end=i+1, name=name))
+    pre_stim_do_data.spans.append(Span(begin=i, end=i+1, name=name))
 
-  pre_stim_data.sample_intervals.extend([0] * 11)
+  pre_stim_do_data.sample_intervals.extend([0] * 11)
 
-  await context.arm_stim("PreMux", pre_stim_declaration)
-  await context.trigger_stim("PreMux")
+  await context.arm_stim("PreMux", pre_stim_do_declaration)
+  await context.trigger_stim("PreMux") # send initial digital out data
 
-  digital_declaration: StimDeclaration = StimDeclaration()
-  digital_data = digital_declaration.data
-  digital_data.channel_type = AnalogResponse.ChannelType.Digital
+  stim_do_declaration: StimDeclaration = StimDeclaration()
+  stim_do_data = stim_do_declaration.data
+  stim_do_data.channel_type = AnalogResponse.ChannelType.Digital
 
   stim_duration_s = context.task_config['Stimulation Duration (s)']
   discharge_duration_s = context.task_config['Discharge Duration (s)']
 
-  def make_digital_sample(stim_on=False, discharge_on=False, power_on=True):
+  def make_digital_data(stim_on=False, discharge_on=False, power_on=True):
     stim = stim_bits if stim_on else [0, 0, 0, 0]
     discharge = [5, 5] if discharge_on else [0, 0]
     power = [5 if power_on else 0]
@@ -604,16 +604,16 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   intervals = []
 
   # Stim phase
-  samples.append(make_digital_sample(stim_on=True))
+  samples.append(make_digital_data(stim_on=True))
   intervals.append(int(1e9 * stim_duration_s))
 
   # Discharge phase
   if discharge_duration_s > 0:
-    samples.append(make_digital_sample(discharge_on=True))
+    samples.append(make_digital_data(discharge_on=True))
     intervals.append(int(1e9 * discharge_duration_s))
 
   # Inter-stim phase
-  samples.append(make_digital_sample())
+  samples.append(make_digital_data())
   intervals.append(1_000_000)  # 1ms or any short interval
 
   # Print
@@ -625,29 +625,29 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   num_samples = len(samples)
   for line in range(num_lines):
     for sample in samples:
-      digital_data.data.append(sample[line])
+      stim_do_data.data.append(sample[line])
 
   for i, line in enumerate(digital_lines):
     begin = i * num_samples
     end = begin + num_samples
-    digital_data.spans.append(Span(begin=begin, end=end, name=line))
+    stim_do_data.spans.append(Span(begin=begin, end=end, name=line))
   
-  digital_data.sample_intervals.extend(intervals)
-  digital_data.trigger = "/PXI1Slot4/RTSI0"
+  stim_do_data.sample_intervals.extend(intervals)
+  stim_do_data.trigger = "/PXI1Slot4/RTSI0"
 
-  await context.arm_stim('MuxDigital', digital_declaration)
+  await context.arm_stim('MuxDigital', stim_do_declaration)
 
-  stim_declaration: StimDeclaration = StimDeclaration()
-  stim_data: AnalogResponse = stim_declaration.data
-  stim_data.channel_type = AnalogResponse.ChannelType.Voltage
+  stim_ao_declaration: StimDeclaration = StimDeclaration()
+  stim_ao_data: AnalogResponse = stim_ao_declaration.data
+  stim_ao_data.channel_type = AnalogResponse.ChannelType.Voltage
   waveform = compute_waveform(context.task_config)
   if waveform is not None:
-    stim_data.data.extend(waveform)
-    stim_data.spans.append(Span(begin=0,end=len(stim_data.data),name=f'/PXI1Slot4/ao{ao}'))
-    stim_data.sample_intervals.append(int(1e9/125e3))
+    stim_ao_data.data.extend(waveform)
+    stim_ao_data.spans.append(Span(begin=0,end=len(stim_ao_data.data),name=f'/PXI1Slot4/ao{ao}'))
+    stim_ao_data.sample_intervals.append(int(1e9/125e3))
 
   if waveform is not None:
-    await context.arm_stim('Ceci', stim_declaration)
+    await context.arm_stim('Ceci', stim_ao_declaration)
 
   display_indicator = False
   state = State.NONE
