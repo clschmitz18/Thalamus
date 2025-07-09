@@ -562,7 +562,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
 
   pre_stim_do_declaration: StimDeclaration = StimDeclaration()
   pre_stim_do_data = pre_stim_do_declaration.data
-  pre_stim_do_data.channel_type = AnalogResponse.ChannelType.Digital
+  pre_stim_do_data.channel_type = AnalogResponse.ChannelType.Voltage
   pre_stim_do_data.data.extend(pre_stim_do)
 
   digital_lines = [
@@ -589,7 +589,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
 
   stim_do_declaration: StimDeclaration = StimDeclaration()
   stim_do_data = stim_do_declaration.data
-  stim_do_data.channel_type = AnalogResponse.ChannelType.Digital
+  stim_do_data.channel_type = AnalogResponse.ChannelType.Voltage
 
   stim_duration_s = context.task_config['Stimulation Duration (s)']
   discharge_duration_s = context.task_config['Discharge Duration (s)']
