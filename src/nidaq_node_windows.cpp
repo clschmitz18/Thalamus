@@ -54,6 +54,7 @@ struct DAQmxAPI {
   decltype(&::DAQmxGetErrorString) DAQmxGetErrorString;
   decltype(&::DAQmxGetExtendedErrorInfo) DAQmxGetExtendedErrorInfo;
   decltype(&::DAQmxTaskControl) DAQmxTaskControl;
+  decltype(&::DAQmxExportSignal) DAQmxExportSignal;
 };
 static DAQmxAPI *daqmxapi;
 
@@ -255,6 +256,15 @@ static bool prepare_nidaq() {
           << "Failed to load DAQmxTaskControl.  NI features disabled";
       return false;
   }
+  daqmxapi->DAQmxExportSignal =
+      reinterpret_cast<decltype(&DAQmxExportSignal)>(
+          ::GetProcAddress(nidaq_dll_handle, "DAQmxExportSignal"));
+  if (!daqmxapi->DAQmxExportSignal) {
+      THALAMUS_LOG(info)
+          << "Failed to load DAQmxExportSignal. NI features disabled";
+      return false;
+  }
+
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
@@ -263,7 +273,7 @@ static bool prepare_nidaq() {
   return true;
 }
 
-std::map<std::string, std::vector<std::string>>
+static std::map<std::string, std::vector<std::string>>
 parse_device_channels(const std::string& input) {
   std::map<std::string, std::vector<std::string>> result;
   std::stringstream ss(input);
@@ -487,7 +497,8 @@ struct NidaqNode::Impl {
           std::string channel_str = "/" + device + "/" + absl::StrJoin(chans, ",");
           TaskHandle handle = nullptr;
         
-          auto daq_error = daqmxapi->DAQmxCreateTask(name + "_" + device.c_str(), &handle);
+          auto task_name = name + "_" + device;
+          auto daq_error = daqmxapi->DAQmxCreateTask(task_name.c_str(), &handle);
           if(check_error(daq_error, "DAQmxCreateTask")) {
             handle = nullptr;
             (*state)["Running"].assign(false);
@@ -599,8 +610,8 @@ struct NidaqNode::Impl {
         // }
       } else {
         for (const auto& [device,handle] : task_handles) {
-          daqmxapi->DAQmxStopTask(task_handle);
-          daqmxapi->DAQmxClearTask(task_handle);
+          daqmxapi->DAQmxStopTask(handle);
+          daqmxapi->DAQmxClearTask(handle);
         }
         task_handles.clear();
         // timer.cancel();
@@ -770,7 +781,7 @@ struct NidaqOutputNode::Impl {
               }
             }
             if (advanced) {
-              for (const auto& [device, task_handle] : task_handles) {
+              for (const auto& [device, handle] : task_handles) {
                 auto status = daqmxapi->DAQmxWriteDigitalLines(
                     handle, 1, true, -1, DAQmx_Val_GroupByChannel,
                     digital_values.data(), nullptr, nullptr);
@@ -896,6 +907,30 @@ struct NidaqOutputNode::Impl {
         this->source = std::weak_ptr<AnalogNode>(analog_node);
         source_connection = locked_source->ready.connect(
             std::bind(&Impl::on_data, this, _1, analog_node.get()));
+
+        if (source_str == "PreStim") {
+          THALAMUS_LOG(info) << "PreStim source connected. Streaming will stop automatically after 100ms.";
+
+          std::thread([this]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            boost::asio::post(io_context, [this] {
+              THALAMUS_LOG(info) << "PreStim stream stopping now.";
+
+              for (const auto& [device, handle] : task_handles) {
+                daqmxapi->DAQmxStopTask(handle);
+                daqmxapi->DAQmxClearTask(handle);
+              }
+              task_handles.clear();
+
+              if (nidaq_thread.joinable()) {
+                nidaq_thread.join();
+              }
+
+              (*state)["Running"].assign(false);
+            });
+          }).detach();
+        }
       });
     } else if (key_str == "Running" || key_str == "Channel" ||
                key_str == "Digital") {
@@ -925,29 +960,37 @@ struct NidaqOutputNode::Impl {
         std::string combined_channels = state->at("Channel");
         auto device_channels = parse_device_channels(combined_channels);
         std::string channel_name = name + " channel";
-        _num_channels = size_t(NidaqNode::get_num_channels(channel));
+        // _num_channels = size_t(NidaqNode::get_num_channels(channel));
         last_digital.resize(_num_channels, false);
         last_analog.resize(_num_channels, 0.0);
-        digital = is_digital(channel);
+        // digital = is_digital(channel);
         _sample_rate = -1;
-        buffer_size = static_cast<size_t>(16 * _num_channels);
+        // buffer_size = static_cast<size_t>(16 * _num_channels);
         std::function<void()> reader;
         running = true;
         if(!fast_forward) {
           nidaq_thread = std::thread(std::bind(&Impl::nidaq_target, this));
         }
 
+        _num_channels = 0;
         for (const auto& [device, chans] : device_channels) {
-          std::string channel_str = "/" + device + "/" +absl::StrJoin(chans, ",");
+          _num_channels += chans.size();
+          std::vector<std::string> full_channels;
+          for (const auto& ch : chans) {
+            full_channels.push_back(device + "/" + ch);
+          }
+          std::string channel_str = absl::StrJoin(full_channels, ",");
           TaskHandle handle = nullptr;
 
-          daq_error = daqmxapi->DAQmxCreateTask((name + "_" + device).c_str(), &handle);
+          auto task_name = name + "_" + device;
+          auto daq_error = daqmxapi->DAQmxCreateTask(task_name.c_str(), &handle);
           if(check_error(daq_error)) {
             handle = nullptr;
             (*state)["Running"].assign(false);
             return;
           }
-
+          
+          digital = is_digital(channel_str);
           if (digital) {
             daq_error = daqmxapi->DAQmxCreateDOChan(
                 handle, channel_str.c_str(), "", DAQmx_Val_ChanForAllLines);
@@ -995,7 +1038,7 @@ struct NidaqOutputNode::Impl {
         }
 
         for (const auto& [device, handle] : task_handles) {
-          if (check_error(daqmxapi->DAQmxStartTask(handle), "DAQmxStartTask")) {
+          if (check_error(daqmxapi->DAQmxStartTask(handle))) {
             (*state)["Running"].assign(false);
             return;
           }
@@ -1113,6 +1156,15 @@ struct NidaqOutputNode::Impl {
 
   thalamus_grpc::StimResponse inline_arm_stim(const thalamus_grpc::StimDeclaration& declaration) {
     TRACE_EVENT("thalamus", "NidaqOutputNode::inline_arm_stim");
+    THALAMUS_LOG(info) << "StimDeclaration received with "
+                   << declaration.data().spans().size() << " spans";
+
+    for (const auto& span : declaration.data().spans()) {
+      THALAMUS_LOG(info) << "  span.name = " << span.name()
+                        << ", begin = " << span.begin()
+                        << ", end = " << span.end();
+    }
+
     thalamus_grpc::StimResponse response;
     auto &error = *response.mutable_error();
 
@@ -1167,7 +1219,7 @@ struct NidaqOutputNode::Impl {
 
     bool is_do = channel_names[0].find("port") != std::string::npos;
     THALAMUS_LOG(info) << "Detected channel type: "
-                   << (is_digital ? "Digital (DO)" : "Analog (AO)");
+                   << (is_do ? "Digital (DO)" : "Analog (AO)");
     auto physical_channels = absl::StrJoin(channel_names, ",");
     
     if (is_do) {
@@ -1253,7 +1305,7 @@ struct NidaqOutputNode::Impl {
       int32 count = 0;
       daq_error = daqmxapi->DAQmxWriteDigitalLines(
         stim_task, samples_per_channel, false, -1, 
-        DAQmx_Val_GroupByScanNumber, digital_buffer.data(), &count,
+        DAQmx_Val_GroupByChannel, digital_buffer.data(), &count,
         nullptr);
       THALAMUS_LOG(info) << "Wrote " << samples_per_channel
                    << " digital samples across " << num_channels
