@@ -558,34 +558,47 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   dischar_bits = [0, 0]
   power_bit = [5]
 
-  pre_stim_do = mux_bits + [0, 0, 0, 0] + dischar_bits + power_bit
+  pre_stim_do = mux_bits + power_bit
 
-  pre_stim_do_declaration: StimDeclaration = StimDeclaration()
-  pre_stim_do_data = pre_stim_do_declaration.data
-  pre_stim_do_data.channel_type = AnalogResponse.ChannelType.Voltage
-  pre_stim_do_data.data.extend(pre_stim_do)
+  mux_signal = AnalogResponse(
+    data=pre_stim_do,
+    spans=[
+      Span(begin=0,end=1,name='/PXI1Slot4/port0/line20'),
+      Span(begin=1,end=2,name='/PXI1Slot4/port0/line29'),
+      Span(begin=2,end=3,name='/PXI1Slot4/port0/line19'),
+      Span(begin=3,end=4,name='/PXI1Slot4/port0/line26'),
+      Span(begin=4,end=5,name='/PXI1Slot4/port0/line8'),
+    ],
+    sample_intervals=[0, 0, 0, 0, 0])
+  print(mux_signal)
+  await context.inject_analog('PreStim', mux_signal)
+
+  # pre_stim_do_declaration: StimDeclaration = StimDeclaration()
+  # pre_stim_do_data = pre_stim_do_declaration.data
+  # pre_stim_do_data.channel_type = AnalogResponse.ChannelType.Voltage
+  # pre_stim_do_data.data.extend(pre_stim_do)
 
   digital_lines = [
-    '/PXI1Slot4/port0/line20',  # Mux bit A0
-    '/PXI1Slot4/port0/line29',  # Mux bit A1
-    '/PXI1Slot4/port0/line19',  # Mux bit A2
-    '/PXI1Slot4/port0/line26',  # Mux bit A3
+    # '/PXI1Slot4/port0/line20',  # Mux bit A0
+    # '/PXI1Slot4/port0/line29',  # Mux bit A1
+    # '/PXI1Slot4/port0/line19',  # Mux bit A2
+    # '/PXI1Slot4/port0/line26',  # Mux bit A3
     '/PXI1Slot4/port0/line7',   # StimD1
     '/PXI1Slot4/port0/line2',   # StimD2
     '/PXI1Slot4/port0/line1',   # StimD3
     '/PXI1Slot4/port0/line6',   # StimD4
     '/PXI1Slot4/port0/line4',   # StimD5
     '/PXI1Slot4/port0/line5',   # StimD6
-    '/PXI1Slot4/port0/line8',   # Power
+    # '/PXI1Slot4/port0/line8',   # Power
   ]
 
-  for i, name in enumerate(digital_lines):
-    pre_stim_do_data.spans.append(Span(begin=i, end=i+1, name=name))
+  # for i, name in enumerate(digital_lines):
+  #   pre_stim_do_data.spans.append(Span(begin=i, end=i+1, name=name))
 
-  pre_stim_do_data.sample_intervals.extend([0] * 11)
+  # pre_stim_do_data.sample_intervals.extend([0] * 11)
 
-  await context.arm_stim("PreMux", pre_stim_do_declaration)
-  await context.trigger_stim("PreMux") # send initial digital out data
+  # await context.arm_stim("PreMux", pre_stim_do_declaration)
+  # await context.trigger_stim("PreMux") # send initial digital out data
 
   stim_do_declaration: StimDeclaration = StimDeclaration()
   stim_do_data = stim_do_declaration.data
@@ -598,7 +611,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
     stim = stim_bits if stim_on else [0, 0, 0, 0]
     discharge = [5, 5] if discharge_on else [0, 0]
     power = [5 if power_on else 0]
-    return mux_bits + stim + discharge + power
+    return stim + discharge
   
   samples = []
   intervals = []
@@ -621,7 +634,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
   for i, sample in enumerate(samples):
     print(f'Sample {i}: {sample}')
 
-  num_lines = 11
+  num_lines = 6
   num_samples = len(samples)
   for line in range(num_lines):
     for sample in samples:
@@ -690,6 +703,7 @@ async def run(context: TaskContextProtocol) -> TaskResult: #pylint: disable=too-
         print('STIMMING')
         create_task_with_exc_handling(asyncio.gather(
           context.log('STIM'),
+          context.trigger_stim('MuxDigital'),
           context.trigger_stim('Ceci')
         ))
         deliver_stim = False
