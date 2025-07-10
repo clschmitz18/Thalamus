@@ -1133,12 +1133,21 @@ struct NidaqOutputNode::Impl {
     }
 
     std::vector<std::string> channel_names;
-    int num_channels = declaration.data().spans().size();
-    int samples_per_channel = declaration.data().spans().empty()
+    const auto& spans = declaration.data().spans();
+    const auto& all_data = declaration.data().data();
+    const auto& intervals = declaration.data().sample_intervals();
+
+    if (spans.empty()) {
+      error.set_message("No spans provided.");
+      return response;
+    }
+
+    int num_channels = spans.size();
+    int samples_per_channel = spans.empty()
                                   ? 0
-                                  : int(declaration.data().spans()[0].end() -
-                                        declaration.data().spans()[0].begin());
-    for (auto &span : declaration.data().spans()) {
+                                  : int(spans[0].end() -
+                                        spans[0].begin());
+    for (auto &span : spans) {
       auto span_size = span.end() - span.begin();
       if (int(span_size) != samples_per_channel) {
         daqmxapi->DAQmxClearTask(stim_task);
@@ -1150,8 +1159,31 @@ struct NidaqOutputNode::Impl {
       }
       channel_names.push_back(span.name());
     }
+
+    THALAMUS_LOG(info) << "StimDeclaration spans:";
+    for (const auto& name : channel_names) {
+      THALAMUS_LOG(info) << "  - " << name;
+    }
+
+    bool is_do = channel_names[0].find("port") != std::string::npos;
+    THALAMUS_LOG(info) << "Detected channel type: "
+                   << (is_digital ? "Digital (DO)" : "Analog (AO)");
     auto physical_channels = absl::StrJoin(channel_names, ",");
-    if(declaration.data().channel_type() == thalamus_grpc::AnalogResponse_ChannelType_Voltage) {
+    
+    if (is_do) {
+      daq_error = daqmxapi->DAQmxCreateDOChan(
+        stim_task, physical_channels.c_str(), "", DAQmx_Val_ChanForAllLines);
+      if (daq_error < 0) {
+        daqmxapi->DAQmxClearTask(stim_task);
+        stim_task = nullptr;
+        error.set_code(daq_error);
+        error.set_message(
+            absl::StrFormat("DAQmxCreateDOChan failed %d", daq_error));
+        THALAMUS_LOG(error) << error.message();
+        return response;
+      }
+      THALAMUS_LOG(info) << "Created DO channels: " << physical_channels;
+    } else if(declaration.data().channel_type() == thalamus_grpc::AnalogResponse_ChannelType_Voltage) {
       daq_error = daqmxapi->DAQmxCreateAOVoltageChan(
           stim_task, physical_channels.c_str(), "", -10.0, 10.0, DAQmx_Val_Volts,
           nullptr);
@@ -1181,10 +1213,10 @@ struct NidaqOutputNode::Impl {
       THALAMUS_ASSERT(false, "Unexpected channel type: %d", declaration.data().channel_type());
     }
 
-    size_t sample_interval = declaration.data().sample_intervals().empty()
+    size_t sample_interval = intervals.empty()
                                  ? 0
-                                 : declaration.data().sample_intervals()[0];
-    for (auto s : declaration.data().sample_intervals()) {
+                                 : intervals[0];
+    for (auto s : intervals) {
       if (sample_interval != s) {
         daqmxapi->DAQmxClearTask(stim_task);
         stim_task = nullptr;
@@ -1209,28 +1241,57 @@ struct NidaqOutputNode::Impl {
       return response;
     }
 
-    std::vector<double> data(declaration.data().data().begin(),
-                             declaration.data().data().end());
-    int offset = 0;
-    while (offset < samples_per_channel) {
+    if (is_do) {
+      std::vector<uInt8> digital_buffer;
+      for (int s = 0; s < samples_per_channel; ++s) {
+        for (int c = 0; c < num_channels; ++c) {
+          double val = all_data[spans[c].begin() + s];
+          digital_buffer.push_back(val >= 2.5 ? 1 : 0);
+        }
+      }
+
       int32 count = 0;
-      daq_error = daqmxapi->DAQmxWriteAnalogF64(
-          stim_task, samples_per_channel - offset, 0, 10.0,
-          DAQmx_Val_GroupByChannel, data.data() + num_channels * offset, &count,
-          nullptr);
-      THALAMUS_LOG(info) << "Wrote " << count << " samples " << offset << " "
-                         << samples_per_channel;
+      daq_error = daqmxapi->DAQmxWriteDigitalLines(
+        stim_task, samples_per_channel, false, -1, 
+        DAQmx_Val_GroupByScanNumber, digital_buffer.data(), &count,
+        nullptr);
+      THALAMUS_LOG(info) << "Wrote " << samples_per_channel
+                   << " digital samples across " << num_channels
+                   << " lines to " << physical_channels;
+
 
       if (daq_error < 0) {
         daqmxapi->DAQmxClearTask(stim_task);
         stim_task = nullptr;
         error.set_code(daq_error);
         error.set_message(
-            absl::StrFormat("DAQmxWriteAnalogF64 failed %d", daq_error));
+          absl::StrFormat("DAQmxWriteDigitalLines failed %d", daq_error));
         THALAMUS_LOG(error) << error.message();
         return response;
       }
-      offset += count;
+    } else {
+      std::vector<double> analog_buffer(all_data.begin(), all_data.end());
+      int offset = 0;
+      while (offset < samples_per_channel) {
+        int32 count = 0;
+        daq_error = daqmxapi->DAQmxWriteAnalogF64(
+          stim_task, samples_per_channel - offset, 0, 10.0,
+          DAQmx_Val_GroupByChannel, analog_buffer.data() + num_channels * offset, &count,
+          nullptr);
+        THALAMUS_LOG(info) << "Wrote " << count << " samples " << offset << " "
+                          << samples_per_channel;
+
+        if (daq_error < 0) {
+          daqmxapi->DAQmxClearTask(stim_task);
+          stim_task = nullptr;
+          error.set_code(daq_error);
+          error.set_message(
+            absl::StrFormat("DAQmxWriteAnalogF64 failed %d", daq_error));
+          THALAMUS_LOG(error) << error.message();
+          return response;
+        }
+        offset += count;
+      }
     }
 
     if (!declaration.trigger().empty()) {
