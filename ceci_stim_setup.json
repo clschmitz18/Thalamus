@@ -100,22 +100,22 @@
     {
       "name": "Ceci",
       "type": "NIDAQ_OUT",
-      "Running": true,
-      "Source": "Mux",
+      "Running": false,
+      "Source": "PreStim",
       "Fast Foward": false,
-      "Channel": "/PXI1Slot4/port0/line20,/PXI1Slot4/port0/line29,/PXI1Slot4/port0/line19,/PXI1Slot4/port0/line26,/PXI1Slot4/port0/line7,/PXI1Slot4/port0/line2,/PXI1Slot4/port0/line1,/PXI1Slot4/port0/line6,/PXI1Slot4/port0/line8",
+      "Channel": "/PXI1Slot4/port0/line20,/PXI1Slot4/port0/line29,/PXI1Slot4/port0/line19,/PXI1Slot4/port0/line26,/PXI1Slot4/port0/line7,/PXI1Slot4/port0/line2,/PXI1Slot4/port0/line1,/PXI1Slot4/port0/line6,/PXI1Slot4/port0/line4,/PXI1Slot4/port0/line5,/PXI1Slot4/port0/line8",
       "View": false,
       "Stims": []
     },
     {
-      "name": "Mux",
+      "name": "PreStim",
       "type": "ANALOG",
       "Widget is Touchpad": false
     },
     {
       "name": "Node 1",
       "type": "NIDAQ",
-      "Running": true,
+      "Running": false,
       "Sample Rate": 125000.0,
       "Poll Interval": 16,
       "Zero Latency": false,
@@ -127,9 +127,9 @@
       "View": true,
       "view_geometry": [
         0,
-        74,
+        657,
         400,
-        910
+        441
       ]
     },
     {
@@ -180,20 +180,20 @@
       "y": 1
     }
   },
-  "status": "Untitled/Untitled = 7/0",
+  "status": "Untitled/Untitled = 1/0",
   "thalamus_view_geometry": [
-    100,
-    100,
-    686,
+    6,
+    5,
+    659,
     768
   ],
   "data_views": [],
   "node_widgets": [
     {
-      "node": "Node 2",
+      "node": "Ceci",
       "dock_area": "right",
       "view_geometry": [
-        350,
+        323,
         33,
         336,
         735
